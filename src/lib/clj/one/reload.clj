@@ -33,6 +33,11 @@
                                          (file-seq (io/file "templates"))))]
     (any-modified k files)))
 
+(defn- reload-cljs-macros
+  [files]
+  (let [name-filter #(second (re-find #"cljs-macros(.*).clj" (.getPath %)))]
+    (apply load (map name-filter (filter #(.isFile %) files)))))
+
 (defn watch-cljs 
   "Ring middleware which watches dir for changes to ClojureScript
   source files and template HTML files. When changes are detected,
@@ -41,9 +46,16 @@
   [handler config]
   (fn [request]
     (let [k (:uri request)
-          ts (any-modified-cljs (:src-root config) k)]
-      (when ts
-        (swap! last-compile assoc k ts)
+          cljs-macros (file-seq (io/file "src/app/cljs-macros"))
+          ts-macros (any-modified k cljs-macros)
+          ts-cljs (any-modified-cljs (:src-root config) k)]
+      (when (or ts-cljs ts-macros)
+        (let [ts (if ts-macros
+                   (do
+                     (reload-cljs-macros cljs-macros)
+                     ts-macros)
+                   ts-cljs)]
+          (swap! last-compile assoc k ts))       
         (let [build-opts (cljs-build-opts config)]
           (doseq [file (file-seq (io/file (str (:output-dir build-opts) "/"
                                                (:top-level-package config))))]
